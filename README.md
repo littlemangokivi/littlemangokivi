@@ -1,5 +1,11 @@
 ## Hi there 👋
 
+<p align="center">
+  <img src="clawd_intro/clawd_intro.gif" width="360" alt="Clawd 的像素风自我介绍：敲 claude、夹 bug、放烟花，最后 Rhett 来串门">
+</p>
+
+<p align="center"><sub>Clawd 的自我介绍，全部用 Python 逐像素画出来的 · <a href="clawd_intro/clawd_intro.mp4">带 8-bit 音效的竖屏完整版</a> · <a href="clawd_intro/clawd_intro.py">源码</a></sub></p>
+
 <!--
 **littlemangokivi/littlemangokivi** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 

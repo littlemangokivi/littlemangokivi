@@ -6,7 +6,8 @@
 
 用法:
   python3 clawd_intro.py preview [out_dir]   # 渲染若干关键帧 + 拼图
-  python3 clawd_intro.py render  [out.mp4]   # 渲染完整视频
+  python3 clawd_intro.py render  [out.mp4]   # 渲染完整视频（含 8-bit 音效）
+  python3 clawd_intro.py gif     [out.gif]   # 渲染 GitHub 主页用的 GIF
 """
 import math
 import os
@@ -133,82 +134,83 @@ BASE = make_base()
 
 
 # ---------------------------------------------------------------- Clawd 本蟹
+# 按官方形象：8x6 的橙色方块身体，两只 1x1 的黑眼睛，两侧 2x2 的小短手，四条腿。
+# 内部用「半格」网格绘制（hs = s/2），这样眯眼、抬手、钳口开合都能更细腻。
+#   身体  x 0..15, y 0..11      眼睛 (2..3, 2..3) / (12..13, 2..3)
+#   左手  x -4..-1, y 4..7      腿   x 0-1, 4-5, 10-11, 14-15, y 12..15
 def draw_clawd(d, cx, by, s, *, claw_l=0, claw_r=0, lift_l=0, lift_r=0,
                leg=0, eyes="open", look=0, blush=False, jump=0):
-    """cx: 身体中心 x；by: 身体顶部 y（站在地面时）；s: 每个像素格的大小。
-    claw_*: 钳子张开程度 0/1/2；lift_*: 手臂抬高格数；leg: 步态 0..3。"""
-    bx = int(round(cx - 7 * s))
-    gy = int(round(by))
-    top = gy - int(round(jump))
+    """cx: 身体中心 x；by: 身体顶部 y（站在地面时）；s: 一格的像素数（4 的倍数最好）。
+    claw_*: 小手张开程度 0/1/2；lift_*: 手抬高的半格数；leg: 步态 0..3。"""
+    hs = s / 2.0
+    bx = cx - 4 * s
+    gy = by
+    top = by - jump
 
-    def u(x, y, c):
-        rect(d, bx + x * s, top + y * s, s, s, c)
+    def h(x, y, w=1, hh=1, c=ORANGE):
+        x0 = int(round(bx + x * hs))
+        y0 = int(round(top + y * hs))
+        x1 = int(round(bx + (x + w) * hs))
+        y1 = int(round(top + (y + hh) * hs))
+        rect(d, x0, y0, x1 - x0, y1 - y0, c)
 
-    # 影子（贴地，跳起来时变小）
-    shrink = int(clamp(jump / (6 * s), 0, 1) * 3)
-    rect(d, bx + (1 + shrink) * s, gy + 11 * s, (12 - 2 * shrink) * s, s, SHADOW)
+    # 影子（贴地，跳起来时缩小）
+    shrink = int(clamp(jump / (3 * s), 0, 1) * 4)
+    rect(d, bx + (1 + shrink) * hs, gy + 16 * hs + 2, (14 - 2 * shrink) * hs, max(3, hs // 2), SHADOW)
 
-    # 腿：四条，横着走时两两交替抬起
-    for lx, group in ((1, 0), (4, 1), (9, 0), (12, 1)):
+    # 腿：两两交替抬起
+    for lx, group in ((0, 0), (4, 1), (10, 0), (14, 1)):
         lifted = (leg == 1 and group == 0) or (leg == 3 and group == 1)
-        u(lx, 9, ORANGE_D)
-        if not lifted:
-            u(lx, 10, ORANGE_D)
+        h(lx, 12, 2, 3 if lifted else 4)
 
     # 身体
-    rect(d, bx, top, 14 * s, 9 * s, ORANGE)
-    rect(d, bx + s, top, 12 * s, s, ORANGE_L)
-    rect(d, bx, top + 8 * s, 14 * s, s, ORANGE_D)
+    h(0, 0, 16, 12)
 
-    # 眼睛
-    for ex in (4 + look, 9 + look):
-        if eyes == "open":
-            u(ex, 2, EYE)
-            u(ex, 3, EYE)
-        elif eyes == "blink":
-            u(ex, 3, EYE)
-        elif eyes == "happy":
-            u(ex - 1, 3, EYE)
-            u(ex, 2, EYE)
-            u(ex + 1, 3, EYE)
-    if blush:
-        u(2, 5, PINK)
-        u(3, 5, PINK)
-        u(10, 5, PINK)
-        u(11, 5, PINK)
-
-    # 钳子
+    # 小手 / 钳子
     for side, o, lift in (("L", claw_l, lift_l), ("R", claw_r, lift_r)):
-        px, py = -5, 1 - lift
-        pts = []
-        # 手臂
-        pts += [(-1, 5, ORANGE_D), (-2, 5, ORANGE_D)]
-        for yy in range(py + 3, 6):
-            pts.append((-3, yy, ORANGE_D))
-        # 掌
-        for xx in range(4):
-            pts.append((px + xx, py, ORANGE))
-            pts.append((px + xx, py + 1, ORANGE))
-            pts.append((px + xx, py + 2, ORANGE_D))
-        pts.append((px + 1, py, ORANGE_L))
-        # 两根指头
-        if o <= 0:
-            fing = [(0, -1), (0, -2), (1, -3), (3, -1), (3, -2), (2, -3)]
-        elif o == 1:
-            fing = [(0, -1), (-1, -2), (-1, -3), (3, -1), (4, -2), (4, -3)]
-        else:
-            fing = [(0, -1), (-1, -1), (-2, -2), (-2, -3),
-                    (3, -1), (4, -1), (5, -2), (5, -3)]
-        for fx, fy in fing:
-            pts.append((px + fx, py + fy, ORANGE))
-        for x, y, c in pts:
-            u(x if side == "L" else 13 - x, y, c)
+        cells = set()
+        for x in range(-4, 0):
+            for y in range(4, 8):
+                cells.add((x, y - lift))
+        if o >= 1:   # 外侧张开一道口子
+            for x in range(-4, -4 + o):
+                for y in (5, 6):
+                    cells.discard((x, y - lift))
+        if o >= 2:   # 上下两瓣再往外撇一点
+            cells.add((-4, 3 - lift))
+            cells.add((-4, 8 - lift))
+        for x, y in cells:
+            h(x if side == "L" else 15 - x, y)
+
+    # 眼睛（以 1/4 格为单位画表情）
+    q = s / 4.0
+    for ex in (2 + look, 12 + look):
+        x0, y0 = bx + ex * hs, top + 2 * hs
+
+        def e(i, j, w=1, hh=1):
+            xa, ya = int(round(x0 + i * q)), int(round(y0 + j * q))
+            xb, yb = int(round(x0 + (i + w) * q)), int(round(y0 + (j + hh) * q))
+            rect(d, xa, ya, xb - xa, yb - ya, EYE)
+
+        if eyes == "open":
+            e(0, 0, 4, 4)
+        elif eyes == "blink":
+            e(0, 2, 4, 1)
+        elif eyes == "happy":
+            e(1, 1, 2, 1)
+            e(0, 2, 1, 2)
+            e(3, 2, 1, 2)
+    if blush:
+        for x in (1, 13):
+            x0 = int(round(bx + x * hs))
+            rect(d, x0, int(round(top + 5 * hs)), int(round(2 * hs)), max(2, int(hs / 2)), PINK)
 
 
-def clawd_grab_point(cx, by, s, side):
+def clawd_grab_point(cx, by, s, side, lift=0):
     """钳口中心（用来对准 bug）"""
-    off = 10.5 * s
-    return (cx - off if side == "L" else cx + off, by - 1.5 * s)
+    hs = s / 2.0
+    off = 4 * s + 3.5 * hs
+    return (cx - off if side == "L" else cx + off, by + (6 - lift) * hs)
 
 
 # ---------------------------------------------------------------- bug
@@ -402,8 +404,8 @@ CMD2 = 'git commit -m "fixed everything"'
 CMD2_T = typed_schedule(20.3, CMD2, base=0.064, jitter=0.03, seed=7)
 ENTER2 = 22.65
 
-STAGE_Y = 318          # Clawd 站位（身体顶部）
-CS = 5                 # Clawd 常规尺寸
+STAGE_Y = 300          # Clawd 站位（身体顶部）
+CS = 12                # Clawd 常规尺寸
 
 # bug: 出生时间、出生点、被抓点、被抓时间
 BUGS = [
@@ -422,8 +424,8 @@ def plan_clawd_path():
     start = 10.9
     for b in BUGS:
         side = "L" if b["x"] < pos[0] else "R"
-        off = 10.5 * CS
-        target = (b["x"] + off if side == "L" else b["x"] - off, b["y"] + 1.5 * CS)
+        off = 5.75 * CS
+        target = (b["x"] + off if side == "L" else b["x"] - off, b["y"] - 3 * CS)
         segs.append(dict(t0=start, t1=b["tc"] - 0.08, a=pos, b=target, side=side, bug=b))
         b["side"] = side
         pos = target
@@ -465,7 +467,7 @@ def clawd_state(t):
         st["look"] = 1
     elif t < 10.0:                                  # 打招呼
         if 7.25 <= t < 9.3:
-            st["lift_l"] = st["lift_r"] = 1 if (t < 7.35 or t > 9.2) else 2
+            st["lift_l"] = st["lift_r"] = 1 if (t < 7.35 or t > 9.2) else 3
             if 7.45 <= t < 9.05:
                 ph = ((t - 7.45) / 0.8) % 1.0
                 o = 2 if ph < 0.5 else 0
@@ -510,17 +512,17 @@ def clawd_state(t):
     elif t < 25.0:                                  # 提交成功，蹦蹦跳跳
         tt = t - ENTER2
         if tt < 1.8:
-            st["jump"] = 24 * abs(math.sin(math.pi * tt / 0.45))
+            st["jump"] = 30 * abs(math.sin(math.pi * tt / 0.45))
         st["eyes"] = "happy"
-        st["lift_l"] = st["lift_r"] = 2
+        st["lift_l"] = st["lift_r"] = 3
         st["claw_l"] = st["claw_r"] = 2 if int(tt * 6) % 2 == 0 else 1
     elif t < 25.7:                                  # 镜头推近
         k = smooth((t - 25.0) / 0.6)
-        st["s"] = 5 if t < 25.2 else (6 if t < 25.4 else 7)
-        st["by"] = lerp(STAGE_Y, 150, k)
+        st["s"] = 12 if t < 25.2 else (14 if t < 25.4 else 16)
+        st["by"] = lerp(STAGE_Y, 116, k)
     else:                                           # S5 / S6 面对镜头
-        st["s"] = 7
-        st["by"] = 150 + (2 if int(t * 2) % 2 else 0)
+        st["s"] = 16
+        st["by"] = 116 + (2 if int(t * 2) % 2 else 0)
         st["blush"] = True
         if blink(2.7, 0.9):
             st["eyes"] = "blink"
@@ -531,9 +533,12 @@ def clawd_state(t):
                 st["claw_r"] = 1 - o
         else:                                       # 彩蛋：朝 kiwi 挥钳子
             st["look"] = 1
-            st["lift_r"] = 3 if t > 37.3 else 1
-            if t > 37.5:
-                st["claw_r"] = 2 if int(t * 5) % 2 == 0 else 0
+            if t > 37.3:
+                up = int(t * 5) % 2 == 0
+                st["lift_r"] = 4 if up else 2
+                st["claw_r"] = 2 if up else 0
+            else:
+                st["lift_r"] = 2
             if t > 38.3:
                 st["eyes"] = "happy"
     return st
@@ -680,10 +685,10 @@ def draw_bugs(d, t):
             continue
         x, y = p
         moving = t < b["tc"] - 0.55
-        draw_bug(d, x, y, 3, int(t * 10) if moving else 0)
+        draw_bug(d, x, y, 4, int(t * 10) if moving else 0)
         # 被盯上时冒个 "!"
         if b["tc"] - 0.5 <= t < b["tc"]:
-            sprite(d, x - 1, y - 32, 3, BANG_ROWS, {"X": YELLOW})
+            sprite(d, x - 1, y - 40, 3, BANG_ROWS, {"X": YELLOW})
 
 
 def draw_catches(d, t, st):
@@ -692,7 +697,7 @@ def draw_catches(d, t, st):
         if tc <= t < tc + 0.3:
             # 夹在钳子里
             gx, gy = clawd_grab_point(st["cx"], st["by"], st["s"], b["side"])
-            draw_bug(d, gx, gy - 4, 3, 0)
+            draw_bug(d, gx, gy, 4, 0)
         if tc + 0.3 <= t < tc + 0.45:
             gx, gy = clawd_grab_point(st["cx"], st["by"], st["s"], b["side"])
             r = int((t - tc - 0.3) * 80) + 4
@@ -783,9 +788,9 @@ def render(t):
         if t >= 3.3:
             pass
         if 7.3 <= t < 9.4:
-            draw_bubble(d, st["cx"] + 58, st["by"] - 66, "Hi~!")
+            draw_bubble(d, st["cx"] + 44, st["by"] - 44, "Hi~!")
         if 10.3 <= t < 10.9:
-            sprite(d, st["cx"] - 2, st["by"] - 48, 4, BANG_ROWS, {"X": ORANGE})
+            sprite(d, st["cx"] - 2, st["by"] - 34, 4, BANG_ROWS, {"X": ORANGE})
 
     if st["visible"]:
         draw_clawd(d, st["cx"], st["by"], st["s"],
@@ -822,6 +827,226 @@ def upscale(img):
     return arr
 
 
+# ---------------------------------------------------------------- 8-bit 音效 & 配乐
+SR = 44100
+
+
+def midi_hz(m):
+    return 440.0 * 2 ** ((m - 69) / 12.0)
+
+
+class Mixer:
+    def __init__(self, dur):
+        self.n = int(SR * dur)
+        self.buf = np.zeros(self.n, dtype=np.float64)
+        self.rng = np.random.default_rng(7)
+
+    def add(self, t0, sig, vol=1.0):
+        i = int(t0 * SR)
+        if i >= self.n or i + len(sig) <= 0:
+            return
+        if i < 0:
+            sig, i = sig[-i:], 0
+        seg = sig[: self.n - i]
+        self.buf[i:i + len(seg)] += seg * vol
+
+    # --- 振荡器
+    @staticmethod
+    def _phase(f0, f1, dur):
+        k = int(dur * SR)
+        f = np.linspace(f0, f1, k) if f1 is not None else np.full(k, f0)
+        return np.cumsum(f) / SR
+
+    def square(self, f0, dur, f1=None, duty=0.5):
+        ph = self._phase(f0, f1, dur)
+        return np.where((ph % 1.0) < duty, 1.0, -1.0)
+
+    def tri(self, f0, dur, f1=None):
+        ph = self._phase(f0, f1, dur)
+        return 4.0 * np.abs((ph % 1.0) - 0.5) - 1.0
+
+    def noise(self, dur, lp=1.0):
+        x = self.rng.uniform(-1, 1, int(dur * SR))
+        if lp < 1.0:          # 一阶低通，让爆炸声更闷
+            y = np.empty_like(x)
+            acc = 0.0
+            for i, v in enumerate(x):
+                acc += lp * (v - acc)
+                y[i] = acc
+            x = y / max(1e-6, np.abs(y).max())
+        return x
+
+    @staticmethod
+    def env(sig, attack=0.003, decay=None, release=0.01):
+        k = len(sig)
+        t = np.arange(k) / SR
+        e = np.ones(k)
+        if attack > 0:
+            e *= np.clip(t / attack, 0, 1)
+        if decay:
+            e *= np.exp(-t / decay)
+        if release > 0:
+            e *= np.clip((k / SR - t) / release, 0, 1)
+        return sig * e
+
+    # --- 音色
+    def key(self, t, soft=False):
+        f = self.rng.uniform(1700, 2300)
+        if soft:
+            self.add(t, self.env(self.tri(f * 0.6, 0.03), decay=0.01), 0.10)
+        else:
+            self.add(t, self.env(self.square(f, 0.025, duty=0.25), decay=0.008), 0.10)
+            self.add(t, self.env(self.noise(0.02), decay=0.004), 0.06)
+
+    def enter(self, t):
+        self.add(t, self.env(self.square(620, 0.06, duty=0.25), decay=0.03), 0.16)
+        self.add(t + 0.06, self.env(self.square(930, 0.08, duty=0.25), decay=0.04), 0.16)
+
+    def notes(self, t, ms, step=0.07, dur=0.09, vol=0.14, duty=0.25, wave="square"):
+        for i, m in enumerate(ms):
+            f = midi_hz(m)
+            sig = self.square(f, dur, duty=duty) if wave == "square" else self.tri(f, dur)
+            self.add(t + i * step, self.env(sig, decay=dur * 0.6), vol)
+
+    def step(self, t):
+        self.add(t, self.env(self.noise(0.03, lp=0.25), decay=0.008), 0.10)
+
+    def snap(self, t):
+        self.add(t, self.env(self.square(520, 0.07, f1=160, duty=0.5), decay=0.025), 0.16)
+        self.add(t, self.env(self.noise(0.05), decay=0.01), 0.10)
+
+    def click(self, t):
+        self.add(t, self.env(self.square(2400, 0.02, duty=0.125), decay=0.006), 0.08)
+
+    def boom(self, t):
+        self.add(t - 0.22, self.env(self.square(500, 0.2, f1=1600, duty=0.125), decay=0.12), 0.05)
+        self.add(t, self.env(self.noise(0.7, lp=0.08), decay=0.18), 0.45)
+        self.add(t, self.env(self.tri(110, 0.3, f1=40), decay=0.1), 0.35)
+        for _ in range(14):
+            dt = float(self.rng.uniform(0.15, 1.1))
+            self.add(t + dt, self.env(self.noise(0.012), decay=0.003), float(self.rng.uniform(0.04, 0.10)))
+
+    def boing(self, t):
+        k = int(0.35 * SR)
+        tt = np.arange(k) / SR
+        f = 260 + 520 * tt / 0.35 + 40 * np.sin(2 * np.pi * 18 * tt)
+        ph = np.cumsum(f) / SR
+        sig = np.sin(2 * np.pi * ph)
+        self.add(t, self.env(sig, decay=0.2), 0.25)
+
+
+# 配乐：C - G - Am - F，120 BPM，三角波贝斯 + 12.5% 方波琶音 + 噪声小鼓
+CHORDS = [(48, [60, 64, 67, 72]), (43, [59, 62, 67, 71]), (45, [57, 60, 64, 69]), (41, [57, 60, 65, 69])]
+BEAT = 0.5
+
+
+def add_music(mx, t_start, t_end, vol=1.0):
+    t = t_start
+    bar = 0
+    while t < t_end - 0.01:
+        root, tones = CHORDS[bar % 4]
+        for b in range(4):
+            tb = t + b * BEAT
+            if tb >= t_end:
+                break
+            # 贝斯：根音 / 五度
+            m = root if b % 2 == 0 else root + 7
+            mx.add(tb, mx.env(mx.tri(midi_hz(m), 0.42), decay=0.25), 0.22 * vol)
+            # 底鼓 & 小镲
+            if b in (0, 2):
+                mx.add(tb, mx.env(mx.tri(140, 0.12, f1=45), decay=0.05), 0.30 * vol)
+            mx.add(tb + BEAT / 2, mx.env(mx.noise(0.03), decay=0.006), 0.05 * vol)
+            if b in (1, 3):
+                mx.add(tb, mx.env(mx.noise(0.08, lp=0.35), decay=0.03), 0.10 * vol)
+            # 琶音（16 分音符）
+            for k in range(4):
+                tk = tb + k * BEAT / 4
+                if tk >= t_end:
+                    break
+                tone = tones[(b * 4 + k) % 4] + 12
+                mx.add(tk, mx.env(mx.square(midi_hz(tone), 0.1, duty=0.125), decay=0.04), 0.035 * vol)
+        t += 4 * BEAT
+        bar += 1
+
+
+def build_audio(path):
+    mx = Mixer(DURATION)
+    # ---- 打字
+    for ct in CMD1_T + CMD2_T + WHOAMI_T + CAPTION_T:
+        mx.key(ct)
+    for ct, ch in zip(INTRO_T, INTRO_FLAT):
+        if ch != " ":
+            mx.key(ct, soft=True)
+    mx.enter(ENTER1)
+    mx.enter(ENTER2)
+    mx.notes(2.62, [72, 76, 79, 84], step=0.07)                 # 欢迎框
+    mx.click(20.1)                                             # 切到 bash 模式
+
+    # ---- 根据动画状态找脚步、钳子开合、跳跃落地
+    prev = None
+    for i in range(NFRAMES):
+        t = i / FPS
+        st = clawd_state(t)
+        if prev and st["visible"]:
+            if st["leg"] != prev["leg"] and st["leg"] in (1, 3):
+                mx.step(t)
+            for k in ("claw_l", "claw_r"):
+                if st[k] > prev[k] and prev[k] == 0:
+                    mx.click(t)
+                elif st[k] == 0 and prev[k] > 0:
+                    mx.snap(t)
+            if prev["jump"] > 3 and st["jump"] <= 3 and t < 25:
+                mx.step(t)
+        prev = st
+
+    # ---- 剧情音效
+    mx.notes(7.3, [79, 84], step=0.12, dur=0.12, vol=0.12, wave="tri")   # Hi~
+    mx.notes(10.3, [88, 93], step=0.06, dur=0.06, vol=0.10)              # Clawd 发现 bug
+    for i, b in enumerate(BUGS):
+        mx.notes(b["t0"] + 0.2, [62, 61], step=0.08, dur=0.06, vol=0.06)  # bug 出没
+        mx.notes(b["tc"] - 0.5, [86, 90], step=0.05, dur=0.05, vol=0.08)  # bug 被盯上
+        base = [72, 74, 76, 79, 81][i]
+        mx.notes(b["tc"] + 0.3, [base, base + 7, base + 12], step=0.06, dur=0.1, vol=0.13)  # ✓
+    mx.notes(18.95, [72, 76, 79, 84, 88, 91, 96], step=0.05, dur=0.08, vol=0.10)  # 5/5
+    for bt, _, _, _ in BURSTS:
+        mx.boom(bt)
+    mx.notes(ENTER2 + 0.3, [84, 83, 84, 88, 91], step=0.09, dur=0.12, vol=0.10)
+    mx.add(25.0, mx.env(mx.square(1400, 0.35, f1=180, duty=0.25), decay=0.2), 0.10)  # clear
+    mx.notes(25.2, [76, 83], step=0.2, dur=0.08, vol=0.10)                            # 推镜头
+    mx.notes(25.75, [72, 79], step=0.08, dur=0.1, vol=0.10)                           # 对话框
+
+    # ---- 配乐
+    add_music(mx, 4.3, 25.0, vol=1.0)
+    add_music(mx, 26.0, 37.0, vol=0.7)
+
+    # ---- 彩蛋：Rhett 的小主题
+    mx.boing(37.0)
+    jingle = [(37.6, 79, .14), (37.75, 84, .14), (37.9, 88, .14), (38.05, 91, .3),
+              (38.45, 88, .14), (38.6, 91, .14), (38.75, 96, .45)]
+    for tj, m, dj in jingle:
+        mx.add(tj, mx.env(mx.square(midi_hz(m), dj, duty=0.25), decay=dj * 0.8), 0.12)
+        mx.add(tj, mx.env(mx.tri(midi_hz(m - 12), dj), decay=dj), 0.10)
+    mx.notes(38.6, [96, 100, 103], step=0.04, dur=0.06, vol=0.06)        # 小爱心
+    for m in (48, 60, 64, 67, 72):                                          # 收尾和弦
+        mx.add(39.2, mx.env(mx.tri(midi_hz(m), 0.8), decay=0.5, release=0.3), 0.12)
+    for m in (76, 79):
+        mx.add(39.2, mx.env(mx.square(midi_hz(m), 0.8, duty=0.125), decay=0.35, release=0.3), 0.04)
+
+    y = mx.buf
+    y = np.tanh(y * 1.1) / np.tanh(1.1)
+    y = y / max(1e-6, np.abs(y).max()) * 0.89
+    fade = int(0.25 * SR)
+    y[-fade:] *= np.linspace(1, 0, fade)
+    pcm = (y * 32767).astype(np.int16)
+    import wave
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes(pcm.tobytes())
+    print("audio written to", path)
+
+
 # ---------------------------------------------------------------- 入口
 PREVIEW_TIMES = [0.9, 3.2, 5.6, 7.6, 12.25, 15.0, 23.3, 29.5, 36.0, 39.0]
 
@@ -850,10 +1075,14 @@ def preview(out_dir):
 
 def render_video(out):
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
-    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
-           "-s", f"{W * SCALE}x{H * SCALE}", "-r", str(FPS), "-i", "-",
+    wav = os.path.splitext(out)[0] + ".wav"
+    build_audio(wav)
+    cmd = ["ffmpeg", "-y", "-loglevel", "error",
+           "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W * SCALE}x{H * SCALE}",
+           "-r", str(FPS), "-i", "-", "-i", wav,
            "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-tune", "animation",
-           "-pix_fmt", "yuv420p", "-movflags", "+faststart", out]
+           "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+           "-movflags", "+faststart", "-shortest", out]
     p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     for i in range(NFRAMES):
         p.stdin.write(upscale(render(i / FPS)).tobytes())
@@ -864,10 +1093,33 @@ def render_video(out):
     print("video written to", out)
 
 
+def render_gif(out, fps=15, scale=1):
+    """GitHub 主页用的 GIF：原生像素尺寸，无扫描线，无损调色板。"""
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    cmd = ["ffmpeg", "-y", "-loglevel", "error",
+           "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W * scale}x{H * scale}",
+           "-r", str(fps), "-i", "-",
+           "-vf", "split[a][b];[a]palettegen=max_colors=128:stats_mode=full:reserve_transparent=0[p];"
+                  "[b][p]paletteuse=dither=none:diff_mode=rectangle",
+           "-loop", "0", out]
+    p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+    n = int(DURATION * fps)
+    for i in range(n):
+        img = render(i / fps)
+        if scale != 1:
+            img = img.resize((W * scale, H * scale), Image.NEAREST)
+        p.stdin.write(img.tobytes())
+    p.stdin.close()
+    p.wait()
+    print("gif written to", out)
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "preview"
     here = os.path.dirname(os.path.abspath(__file__))
     if mode == "preview":
         preview(sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "preview"))
+    elif mode == "gif":
+        render_gif(sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "clawd_intro.gif"))
     else:
         render_video(sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "clawd_intro.mp4"))
